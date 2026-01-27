@@ -10,17 +10,29 @@ import numpy as np
 # --- 1. הגדרת דף ---
 st.set_page_config(page_title="TheWind", page_icon="logo.png", layout="wide")
 
-# --- 2. ניהול מצבים ---
+# --- 2. ניהול מצבים (State Management) ---
 if 'theme' not in st.session_state:
     st.session_state.theme = 'light' 
 if 'accessibility' not in st.session_state:
     st.session_state.accessibility = False
+if 'show_news_screen' not in st.session_state: 
+    st.session_state.show_news_screen = False
+if 'selected_city' not in st.session_state:
+    st.session_state.selected_city = "Tel Aviv"
+if 'view_mode' not in st.session_state:
+    st.session_state.view_mode = 'desktop' # ברירת מחדל
 
 def toggle_theme():
     st.session_state.theme = 'dark' if st.session_state.theme == 'light' else 'light'
 
 def toggle_accessibility():
     st.session_state.accessibility = not st.session_state.accessibility
+
+def toggle_news_view():
+    st.session_state.show_news_screen = not st.session_state.show_news_screen
+
+def toggle_view_mode():
+    st.session_state.view_mode = 'mobile' if st.session_state.view_mode == 'desktop' else 'desktop'
 
 # --- 3. צבעים ---
 if st.session_state.theme == 'light':
@@ -70,25 +82,23 @@ st.markdown(f"""
         border-left: 1px solid {border_color};
     }}
     
-    /* עיצוב תיבת חיפוש */
+    /* עיצוב תיבת הטקסט - גוגל סטייל */
     div[data-testid="stTextInput"] input {{
         background-color: {card_bg};
         color: {text_color};
-        border-radius: 25px;
+        border-radius: 50px;
         border: 1px solid {border_color};
-        padding: 10px 15px;
-        transition: all 0.3s;
-        box-shadow: inset 0 2px 4px rgba(0,0,0,0.05);
+        padding: 12px 20px;
+        text-align: right;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        transition: all 0.3s ease;
     }}
     div[data-testid="stTextInput"] input:focus {{
         border-color: {accent};
-        box-shadow: 0 0 0 2px {accent}33;
+        box-shadow: 0 4px 10px rgba(14, 165, 233, 0.2);
+        outline: none;
     }}
-    div[data-testid="stTextInput"] label {{
-        color: {text_color} !important;
-        font-weight: bold;
-        margin-bottom: 5px;
-    }}
+    div[data-testid="stTextInput"] label {{ display: none; }}
     
     /* עיצוב כרטיסיות מדדים */
     div[data-testid="metric-container"] {{
@@ -99,42 +109,36 @@ st.markdown(f"""
         box-shadow: {shadow};
         text-align: center;
         direction: rtl;
-        transition: transform 0.2s;
         height: 100%;
-    }}
-    div[data-testid="metric-container"]:hover {{
-        transform: translateY(-3px);
-        border-color: {accent};
+        min-height: 100px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
     }}
     
     /* עיצוב כרטיסיות חדשות */
     .news-card {{
         background-color: {news_bg};
         border: 1px solid {border_color};
-        border-radius: 8px;
-        padding: 10px;
-        margin-bottom: 8px;
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 15px;
         box-shadow: {shadow};
-        border-right: 3px solid {accent};
+        border-right: 4px solid {accent};
         direction: rtl;
         text-align: right;
-        transition: all 0.2s;
-    }}
-    .news-card:hover {{
-        transform: translateX(-3px);
-        border-color: {accent};
     }}
     .news-card a {{
         text-decoration: none;
         color: {text_color} !important;
-        font-weight: 600;
-        font-size: 0.9rem;
+        font-weight: 700;
+        font-size: 1rem;
         display: block;
-        margin-bottom: 3px;
+        margin-bottom: 5px;
     }}
     .news-source {{
-        font-size: 0.7rem;
-        opacity: 0.6;
+        font-size: 0.8rem;
+        opacity: 0.7;
         color: {text_color};
     }}
 
@@ -155,27 +159,44 @@ st.markdown(f"""
         text-align: right;
     }}
 
-    /* כפתורים צפים */
+    /* כפתורים צפים למטה */
     div.floating-buttons {{
         position: fixed;
         bottom: 20px;
         left: 20px;
-        z-index: 9999;
+        z-index: 99990;
         display: flex;
-        gap: 10px;
+        gap: 8px;
         background-color: {card_bg};
-        padding: 10px;
+        padding: 8px;
         border-radius: 50px;
         box-shadow: {shadow};
         border: 1px solid {border_color};
     }}
     .stButton button {{
-        border-radius: 20px;
+        border-radius: 50px;
         border: 1px solid {border_color};
         background-color: {btn_bg};
         color: {btn_text_color};
         font-weight: bold;
-        padding: 5px 15px;
+    }}
+    
+    /* כפתור החלפת ממשק (שמאל למעלה) */
+    .view-toggle {{
+        position: fixed;
+        top: 60px; /* מתחת להדר של סטרימליט */
+        left: 20px;
+        z-index: 99999;
+    }}
+    .view-toggle button {{
+        box-shadow: 0 4px 10px rgba(0,0,0,0.2) !important;
+        background-color: {accent} !important;
+        color: white !important;
+        border: none !important;
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        font-size: 1.5rem;
     }}
 </style>
 """, unsafe_allow_html=True)
@@ -183,24 +204,29 @@ st.markdown(f"""
 # --- 5. פונקציות נתונים ---
 @st.cache_data(ttl=1800)
 def get_data(city):
-    keys = st.secrets
     try:
-        g = requests.get(f"http://api.openweathermap.org/geo/1.0/direct?q={city}&limit=1&appid={keys['OPENWEATHER_KEY']}").json()
-        if not g: return None
+        api_key = st.secrets['OPENWEATHER_KEY']
+    except Exception:
+        return None, None
+
+    try:
+        g = requests.get(f"http://api.openweathermap.org/geo/1.0/direct?q={city}&limit=1&appid={api_key}").json()
+        if not g: return None, None
         lat, lon = g[0]['lat'], g[0]['lon']
         name = g[0]['name']
         
         url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&hourly=temperature_2m,precipitation_probability&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max&timezone=auto"
-        return requests.get(url).json(), name
+        res = requests.get(url)
+        if res.status_code != 200: return None, None
+        return res.json(), name
     except: return None, None
 
 def get_news(city):
     try:
         encoded = quote(city)
-        return feedparser.parse(f"https://news.google.com/rss/search?q=מזג%20האוויר%20{encoded}&hl=he&gl=IL&ceid=IL:he").entries[:5]
+        return feedparser.parse(f"https://news.google.com/rss/search?q=מזג%20האוויר%20{encoded}&hl=he&gl=IL&ceid=IL:he").entries[:6]
     except: return []
 
-# פונקציה להמלצת לבוש
 def get_clothing_advice(temp):
     if temp > 25: return "🩳 חולצה קצרה, משקפי שמש וכובע"
     if temp > 20: return "👕 חולצה קצרה או ארוכה דקה"
@@ -219,37 +245,87 @@ weather_icons = {0:'☀️', 1:'🌤️', 2:'⛅', 3:'☁️', 45:'🌫️', 51:
 def get_status_text(code):
     return weather_desc.get(code, 'רגיל')
 
-# --- 6. ממשק משתמש (UI) ---
+# --- 6. כפתור החלפת ממשק (שמאל למעלה) ---
+st.markdown('<div class="view-toggle">', unsafe_allow_html=True)
+# הכפתור מציג את האייקון של מה שיקרה אם תלחץ עליו (אם אתה במחשב, הוא מראה טלפון ולהפך)
+toggle_icon = "📱" if st.session_state.view_mode == 'desktop' else "💻"
+if st.button(toggle_icon, key="view_toggler"):
+    toggle_view_mode()
+    st.rerun()
+st.markdown('</div>', unsafe_allow_html=True)
 
+# --- 7. ממשק משתמש (UI) ---
+
+# תפריט צד (משותף לשני המצבים - חיפוש)
 with st.sidebar:
     try:
         st.image("logo.png", use_container_width=True)
     except:
         st.markdown(f"<h1 style='text-align:center; color:{accent};'>TheWind</h1>", unsafe_allow_html=True)
     
-    city_in = st.text_input("חפש עיר", "Tel Aviv")
+    st.markdown("<div style='text-align:right; font-weight:bold; margin-bottom:5px;'>חפש עיר:</div>", unsafe_allow_html=True)
+    city_input = st.text_input("חפש עיר", value=st.session_state.selected_city)
     
-    data = None
-    if city_in:
-        data, city_name = get_data(city_in)
+    st.markdown(f"<small style='opacity:0.7'>נפוצים:</small>", unsafe_allow_html=True)
+    col_q1, col_q2, col_q3 = st.columns(3)
+    if col_q1.button("ת\"א"): st.session_state.selected_city = "Tel Aviv"; st.rerun()
+    if col_q2.button("י-ם"): st.session_state.selected_city = "Jerusalem"; st.rerun()
+    if col_q3.button("חיפה"): st.session_state.selected_city = "Haifa"; st.rerun()
 
-    st.write("---")
+    if city_input and city_input != st.session_state.selected_city:
+        st.session_state.selected_city = city_input
+
+    # במצב דסקטופ - החדשות מופיעות כאן בסרגל הצד
+    if st.session_state.view_mode == 'desktop':
+        st.write("---")
+        st.subheader("📰 עדכונים")
+        if st.session_state.selected_city:
+            news_items = get_news(st.session_state.selected_city)
+            if news_items:
+                for item in news_items:
+                    src = item.source.title if hasattr(item, 'source') else 'News'
+                    st.markdown(f"""
+                    <div class="news-card">
+                        <a href="{item.link}" target="_blank">{item.title}</a>
+                        <div class="news-source">{src}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.caption("אין עדכונים זמינים")
+
+# --- כפתורים צפים למטה (Theme, Access) ---
+with st.sidebar:
+    st.markdown('<div class="floating-buttons">', unsafe_allow_html=True)
+    # במצב מובייל יש כפתור נוסף לחדשות
+    cols = st.columns([1,1,1]) if st.session_state.view_mode == 'mobile' else st.columns([1,1])
     
-    if data:
-        rain_sum = data['daily']['precipitation_sum'][0]
-        rain_color = "#ef4444" if rain_sum > 20 else "#10b981"
-        note = "יבש" if rain_sum == 0 else "רטוב"
-        
-        st.markdown(f"""
-        <div style="background:{card_bg}; padding:15px; border-radius:12px; border:1px solid {border_color}; text-align:center; box-shadow:{shadow};">
-            <div style="font-size:0.9rem; opacity:0.7; margin-bottom:5px;">גובה מים (הצטברות)</div>
-            <div style="font-size:2.5rem; font-weight:bold; color:{rain_color}; line-height:1;">{rain_sum}</div>
-            <div style="font-size:0.8rem; opacity:0.8;">מ"מ • {note}</div>
-        </div>
-        """, unsafe_allow_html=True)
+    with cols[0]:
+        if st.button("🌙" if st.session_state.theme == 'light' else "☀️"): toggle_theme(); st.rerun()
+    with cols[1]:
+        if st.button("♿"): toggle_accessibility(); st.rerun()
+    
+    # כפתור חדשות למובייל בלבד
+    if st.session_state.view_mode == 'mobile':
+        with cols[2]:
+            news_icon = "🏠" if st.session_state.show_news_screen else "📰"
+            if st.button(news_icon): toggle_news_view(); st.rerun()
+            
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    st.write("---")
-    st.subheader("📰 עדכונים")
+
+# --- שליפת נתונים ---
+city_in = st.session_state.selected_city
+data, city_name = get_data(city_in) if city_in else (None, None)
+
+# ==========================================
+# לוגיקה ראשית: פיצול בין מובייל לדסקטופ
+# ==========================================
+
+# 1. מצב מובייל - מסך חדשות מלא
+if st.session_state.view_mode == 'mobile' and st.session_state.show_news_screen:
+    st.markdown(f"<h1 style='text-align:center;'>📰 חדשות - {city_name}</h1>", unsafe_allow_html=True)
+    if st.button("⬅️ חזרה"): toggle_news_view(); st.rerun()
+    
     if city_in:
         news_items = get_news(city_in)
         if news_items:
@@ -258,34 +334,22 @@ with st.sidebar:
                 st.markdown(f"""
                 <div class="news-card">
                     <a href="{item.link}" target="_blank">{item.title}</a>
-                    <div class="news-source">{src}</div>
+                    <div class="news-source">{src} • {item.published if 'published' in item else ''}</div>
                 </div>
                 """, unsafe_allow_html=True)
         else:
-            st.caption("אין עדכונים זמינים")
+            st.info("אין חדשות.")
 
-st.sidebar.markdown("---")
-with st.sidebar:
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    st.markdown('<div class="floating-buttons">', unsafe_allow_html=True)
-    c1, c2 = st.columns(2)
-    with c1:
-        btn_lbl = "🌙 לילה" if st.session_state.theme == 'light' else "☀️ יום"
-        if st.button(btn_lbl): toggle_theme(); st.rerun()
-    with c2:
-        acc_lbl = "♿ נגישות" 
-        if st.button(acc_lbl): toggle_accessibility(); st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# מסך ראשי
-if data:
+# 2. מצב ראשי (דסקטופ או מובייל רגיל)
+elif data:
     curr = data['current']
     
-    # כותרת
     st.markdown(f"<h1 style='font-size:3rem; margin-bottom:0;'>{city_name}</h1>", unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # --- שורת מדדים ראשית (6 עמודות עכשיו) ---
+    # --- תצוגת מדדים ---
+    # בדסקטופ: 6 בשורה
+    # במובייל: סטרימליט ישבור שורות לבד, אבל נשתמש ב-columns הרגיל
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     
     rain_sum = data['daily']['precipitation_sum'][0]
@@ -298,30 +362,27 @@ if data:
     with col1: st.metric("טמפרטורה", f"{round(curr['temperature_2m'])}°")
     with col2: st.metric("גובה מים", f"{rain_sum} מ\"מ")
     with col3: st.metric("לחות", f"{curr['relative_humidity_2m']}%")
-    with col4: st.metric("סיכוי לגשם (משקעים)", f"{rain_prob}%")
-    with col5: st.metric("מהירות רוח", f"{round(curr['wind_speed_10m'])} קמ\"ש") # הוספנו רוח
+    with col4: st.metric("סיכוי לגשם", f"{rain_prob}%")
+    with col5: st.metric("רוח", f"{round(curr['wind_speed_10m'])}")
     with col6: st.metric("מצב", final_status)
 
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # --- שורת המלצות (לבוש + נהיגה) ---
+    # --- המלצות ---
     c_clothing, c_driving = st.columns(2)
-    
     with c_clothing:
         st.info(f"💡 **המלצת לבוש:** {get_clothing_advice(curr['temperature_2m'])}")
-        
     with c_driving:
-        # בדיקת תנאי נהיגה
         is_raining = rain_sum > 0.5 or curr['weather_code'] >= 51
         if is_raining:
-            st.warning("🚗 **תנאי נהיגה:** הכביש רטוב! סע בזהירות והדלק אורות.")
+            st.warning("🚗 **תנאי נהיגה:** כביש רטוב! סע בזהירות.")
         else:
-            st.success("🚗 **תנאי נהיגה:** תנאים טובים. סע בבטחה.")
+            st.success("🚗 **תנאי נהיגה:** תנאים טובים.")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     # --- לשוניות ---
-    tab_graph, tab_week, tab_month = st.tabs(["📉 גרף 24 שעות", "📅 השבוע הקרוב", "🗓️ תחזית חודשית"])
+    tab_graph, tab_week, tab_month = st.tabs(["📉 24 שעות", "📅 השבוע", "🗓️ החודש"])
 
     with tab_graph:
         hourly = data['hourly']
@@ -334,55 +395,45 @@ if data:
         
         fig = go.Figure()
         fig.add_trace(go.Scatter(
-            x=df['hour'], 
-            y=df['temp'],
-            customdata=df['rain_prob'], 
-            fill='tozeroy',
-            mode='lines+markers',
-            line=dict(color=graph_line, width=4),
-            fillcolor=graph_fill,
+            x=df['hour'], y=df['temp'], customdata=df['rain_prob'], 
+            fill='tozeroy', mode='lines+markers',
+            line=dict(color=graph_line, width=4), fillcolor=graph_fill,
             marker=dict(size=8, color=card_bg, line=dict(color=graph_line, width=2)),
-            hovertemplate="<b style='font-size:1.5em'>שעה: %{x}</b><br><br>" +
-                          "🌡️ טמפרטורה: <b>%{y}°</b><br>" +
-                          "☔ סיכוי לגשם: <b>%{customdata}%</b><extra></extra>" 
+            hovertemplate="שעה: %{x}<br>טמפרטורה: %{y}°<br>גשם: %{customdata}%<extra></extra>" 
         ))
-        
         fig.update_layout(
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
-            margin=dict(l=0,r=0,t=30,b=20),
-            height=350,
-            xaxis=dict(showgrid=False, fixedrange=True, tickfont=dict(color=text_color, size=14)),
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            margin=dict(l=0,r=0,t=30,b=20), height=300,
+            xaxis=dict(showgrid=False, fixedrange=True, tickfont=dict(color=text_color)),
             yaxis=dict(showgrid=True, gridcolor=border_color, fixedrange=True, tickfont=dict(color=text_color)),
-            hovermode="x unified",
-            hoverlabel=dict(
-                bgcolor=hover_bg,
-                font_size=16,
-                font_family="Segoe UI",
-                bordercolor=accent
-            )
+            hovermode="x unified", hoverlabel=dict(bgcolor=hover_bg, bordercolor=accent)
         )
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     with tab_week:
-        cols = st.columns(7)
+        # במובייל נרצה 2-3 בשורה, בדסקטופ 7
+        num_cols = 2 if st.session_state.view_mode == 'mobile' else 7
+        cols = st.columns(num_cols)
+        
         for i in range(7):
             d_date = datetime.strptime(data['daily']['time'][i], "%Y-%m-%d").strftime("%d/%m")
             d_temp = round(data['daily']['temperature_2m_max'][i])
             d_rain = data['daily']['precipitation_probability_max'][i]
-            with cols[i]:
+            
+            # חישוב אינדקס העמודה הנכון (מודולו)
+            col_idx = i % num_cols
+            with cols[col_idx]:
                 st.markdown(f"""
                 <div class="day-card">
                     <b>{d_date}</b><br>
-                    <span style="font-size: 1.2rem;">{d_temp}°</span><br>
-                    <span style="color: {accent}; font-size: 0.8rem;">💧{d_rain}%</span>
+                    <span>{d_temp}°</span><br>
+                    <span style="color:{accent}; font-size:0.8rem;">💧{d_rain}%</span>
                 </div>
                 """, unsafe_allow_html=True)
 
     with tab_month:
         month_data = []
         base_temp = np.mean(data['daily']['temperature_2m_max'])
-        
         for i in range(30):
             d_str = (datetime.now() + timedelta(days=i)).strftime("%d/%m")
             if i < 7:
@@ -393,22 +444,23 @@ if data:
                 r = np.random.randint(0, 30)
             month_data.append((d_str, t, r))
         
-        for i in range(0, 30, 6):
-            cols = st.columns(6)
-            for j in range(6):
+        # גריד מותאם
+        grid_cols = 3 if st.session_state.view_mode == 'mobile' else 6
+        for i in range(0, 30, grid_cols):
+            cols = st.columns(grid_cols)
+            for j in range(grid_cols):
                 if i + j < 30:
                     d_str, t, r = month_data[i+j]
                     with cols[j]:
                          st.markdown(f"""
-                        <div class="day-card">
-                            <b>{d_str}</b><br>
-                            <span style="font-size: 1.2rem;">{t}°</span><br>
-                            <span style="color: {accent}; font-size: 0.8rem;">💧{r}%</span>
+                        <div class="day-card" style="padding:5px;">
+                            <small>{d_str}</small><br>
+                            <b>{t}°</b>
                         </div>
                         """, unsafe_allow_html=True)
 
 else:
-    st.error("לא נמצאו נתונים לעיר זו")
+    if not data: st.error("לא נמצאו נתונים")
 
 st.markdown("<br><hr>", unsafe_allow_html=True)
-st.markdown("<center style='opacity:0.5; font-size:0.8rem;'>אנחנו יכולים לטעות לפעמים | TheWind © 2026</center>", unsafe_allow_html=True)
+st.markdown("<center style='opacity:0.5; font-size:0.8rem;'>TheWind © 2026</center>", unsafe_allow_html=True)

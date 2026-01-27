@@ -363,7 +363,7 @@ elif data:
     with col2: st.metric("גובה מים", f"{rain_sum} מ\"מ")
     with col3: st.metric("לחות", f"{curr['relative_humidity_2m']}%")
     with col4: st.metric("סיכוי לגשם", f"{rain_prob}%")
-    with col5: st.metric("רוח", f'קמ"ש {round(curr['wind_speed_10m'])}')
+    with col5: st.metric("רוח", f'{round(curr['wind_speed_10m'])} קמ"ש')
     with col6: st.metric("מצב", final_status)
 
     st.markdown("<br>", unsafe_allow_html=True)

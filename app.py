@@ -6,12 +6,12 @@ import feedparser
 from datetime import datetime, timedelta
 from urllib.parse import quote
 import numpy as np
-from email.utils import parsedate_to_datetime # ספריה חדשה לטיפול בתאריכי חדשות
+from email.utils import parsedate_to_datetime
 
-# --- 1. הגדרת דף (עם הכותרת החדשה שביקשת) ---
+# --- 1. הגדרת דף ---
 st.set_page_config(page_title="TheWind - תחזית מזג אוויר חכמה", page_icon="logo.png", layout="wide")
 
-# --- 2. ניהול מצבים (State Management) ---
+# --- 2. ניהול מצבים ---
 if 'theme' not in st.session_state:
     st.session_state.theme = 'light' 
 if 'accessibility' not in st.session_state:
@@ -83,7 +83,6 @@ st.markdown(f"""
         border-left: 1px solid {border_color};
     }}
     
-    /* עיצוב תיבת הטקסט */
     div[data-testid="stTextInput"] input {{
         background-color: {card_bg};
         color: {text_color};
@@ -101,7 +100,6 @@ st.markdown(f"""
     }}
     div[data-testid="stTextInput"] label {{ display: none; }}
     
-    /* עיצוב כרטיסיות מדדים */
     div[data-testid="metric-container"] {{
         background-color: {card_bg};
         border: 1px solid {border_color};
@@ -117,7 +115,6 @@ st.markdown(f"""
         justify-content: center;
     }}
     
-    /* עיצוב כרטיסיות חדשות */
     .news-card {{
         background-color: {news_bg};
         border: 1px solid {border_color};
@@ -143,7 +140,6 @@ st.markdown(f"""
         color: {text_color};
     }}
 
-    /* עיצוב כרטיסייה יומית */
     .day-card {{
         text-align: center; 
         background: {news_bg}; 
@@ -160,7 +156,6 @@ st.markdown(f"""
         text-align: right;
     }}
 
-    /* כפתורים צפים למטה */
     div.floating-buttons {{
         position: fixed;
         bottom: 20px;
@@ -182,7 +177,6 @@ st.markdown(f"""
         font-weight: bold;
     }}
     
-    /* כפתור החלפת ממשק (שמאל למעלה) */
     .view-toggle {{
         position: fixed;
         top: 60px;
@@ -222,25 +216,37 @@ def get_data(city):
         return res.json(), name
     except: return None, None
 
-def get_news(city):
+def fetch_feed(query, hours_limit):
+    """פונקציית עזר לשליפת חדשות עם סינון זמן"""
     try:
-        encoded = quote(city)
-        # מושכים יותר כתבות בהתחלה כדי שנוכל לסנן
-        feed = feedparser.parse(f"https://news.google.com/rss/search?q=מזג%20האוויר%20{encoded}&hl=he&gl=IL&ceid=IL:he")
-        
+        encoded = quote(query)
+        feed = feedparser.parse(f"https://news.google.com/rss/search?q={encoded}&hl=he&gl=IL&ceid=IL:he")
         filtered_entries = []
         for entry in feed.entries:
-            # המרת תאריך הפרסום לאובייקט זמן שאפשר לחשב
             if 'published' in entry:
                 pub_date = parsedate_to_datetime(entry.published)
-                # בדיקה אם הכתבה פורסמה ב-30 השעות האחרונות
-                # אנחנו משתמשים בזמן של הכתבה כדי למנוע בעיות אזורי זמן
                 now = datetime.now(pub_date.tzinfo)
-                if now - pub_date <= timedelta(hours=30):
+                # סינון לפי מספר השעות שהוגדר
+                if now - pub_date <= timedelta(hours=hours_limit):
                     filtered_entries.append(entry)
-        
-        return filtered_entries[:6] # מחזירים את ה-6 החדשות ביותר שעברו את הסינון
-    except: return []
+        return filtered_entries
+    except:
+        return []
+
+def get_news(city):
+    # ניסיון 1: חדשות ספציפיות על העיר (עד 72 שעות אחורה - כדי למצוא משהו מקומי)
+    # שיניתי ל-72 כי חדשות מקומיות הן נדירות יותר מחדשות ארציות
+    news = fetch_feed(f"מזג האוויר {city}", 72)
+    
+    # ניסיון 2 (גיבוי): אם אין כלום על העיר, תביא חדשות כלליות על מזג האוויר בישראל
+    # כאן אנחנו לוקחים רק מה-24 שעות האחרונות כי זה תמיד מתעדכן
+    if not news:
+        news = fetch_feed("מזג האוויר בישראל", 24)
+        # מסמנים שזה חדשות כלליות
+        if news:
+            news[0]['is_general'] = True 
+            
+    return news[:6]
 
 def get_clothing_advice(temp):
     if temp > 25: return "🩳 חולצה קצרה, משקפי שמש וכובע"
@@ -260,7 +266,7 @@ weather_icons = {0:'☀️', 1:'🌤️', 2:'⛅', 3:'☁️', 45:'🌫️', 51:
 def get_status_text(code):
     return weather_desc.get(code, 'רגיל')
 
-# --- 6. כפתור החלפת ממשק (שמאל למעלה) ---
+# --- 6. כפתור החלפת ממשק ---
 st.markdown('<div class="view-toggle">', unsafe_allow_html=True)
 toggle_icon = "📱" if st.session_state.view_mode == 'desktop' else "💻"
 if st.button(toggle_icon, key="view_toggler"):
@@ -291,10 +297,12 @@ with st.sidebar:
     # במצב דסקטופ - חדשות בסרגל צד
     if st.session_state.view_mode == 'desktop':
         st.write("---")
-        st.subheader("📰 עדכונים (30 שעות)")
+        st.subheader("📰 עדכונים")
         if st.session_state.selected_city:
             news_items = get_news(st.session_state.selected_city)
             if news_items:
+                if news_items[0].get('is_general'):
+                     st.caption("לא נמצאו חדשות על העיר, מציג חדשות כלליות:")
                 for item in news_items:
                     src = item.source.title if hasattr(item, 'source') else 'News'
                     st.markdown(f"""
@@ -304,7 +312,7 @@ with st.sidebar:
                     </div>
                     """, unsafe_allow_html=True)
             else:
-                st.caption("אין עדכונים חדשים בשעות האחרונות")
+                st.caption("אין עדכונים חדשים כרגע")
 
 # --- כפתורים צפים למטה ---
 with st.sidebar:
@@ -334,12 +342,15 @@ data, city_name = get_data(city_in) if city_in else (None, None)
 
 # 1. מצב מובייל - מסך חדשות מלא
 if st.session_state.view_mode == 'mobile' and st.session_state.show_news_screen:
-    st.markdown(f"<h1 style='text-align:center;'>📰 חדשות (30 שעות)</h1>", unsafe_allow_html=True)
+    st.markdown(f"<h1 style='text-align:center;'>📰 חדשות ועדכונים</h1>", unsafe_allow_html=True)
     if st.button("⬅️ חזרה"): toggle_news_view(); st.rerun()
     
     if city_in:
         news_items = get_news(city_in)
         if news_items:
+            if news_items[0].get('is_general'):
+                 st.info(f"לא נמצאו חדשות ספציפיות על {city_name} ב-72 השעות האחרונות. מציג חדשות כלליות:")
+            
             for item in news_items:
                 src = item.source.title if hasattr(item, 'source') else 'News'
                 st.markdown(f"""
@@ -349,7 +360,7 @@ if st.session_state.view_mode == 'mobile' and st.session_state.show_news_screen:
                 </div>
                 """, unsafe_allow_html=True)
         else:
-            st.info("לא נמצאו עדכונים ב-30 השעות האחרונות.")
+            st.info("לא נמצאו עדכונים רלוונטיים כרגע.")
 
 # 2. מצב ראשי
 elif data:

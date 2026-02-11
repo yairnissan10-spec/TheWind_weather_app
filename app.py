@@ -8,7 +8,7 @@ from urllib.parse import quote
 import numpy as np
 
 # --- 1. הגדרת דף ---
-st.set_page_config(page_title="TheWind", page_icon="logo.png", layout="wide")
+st.set_page_config(page_title="TheWind - תחזית מזג אוויר חכמה", page_icon="logo.png", layout="wide")
 
 # --- 2. ניהול מצבים (State Management) ---
 if 'theme' not in st.session_state:

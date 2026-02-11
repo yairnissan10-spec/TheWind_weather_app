@@ -217,7 +217,6 @@ def get_data(city):
     except: return None, None
 
 def fetch_feed(query, hours_limit):
-    """פונקציית עזר לשליפת חדשות עם סינון זמן"""
     try:
         encoded = quote(query)
         feed = feedparser.parse(f"https://news.google.com/rss/search?q={encoded}&hl=he&gl=IL&ceid=IL:he")
@@ -226,7 +225,6 @@ def fetch_feed(query, hours_limit):
             if 'published' in entry:
                 pub_date = parsedate_to_datetime(entry.published)
                 now = datetime.now(pub_date.tzinfo)
-                # סינון לפי מספר השעות שהוגדר
                 if now - pub_date <= timedelta(hours=hours_limit):
                     filtered_entries.append(entry)
         return filtered_entries
@@ -234,19 +232,15 @@ def fetch_feed(query, hours_limit):
         return []
 
 def get_news(city):
-    # ניסיון 1: חדשות ספציפיות על העיר (עד 72 שעות אחורה - כדי למצוא משהו מקומי)
-    # שיניתי ל-72 כי חדשות מקומיות הן נדירות יותר מחדשות ארציות
+    # חיפוש חדשות מקומיות (עד 72 שעות)
     news = fetch_feed(f"מזג האוויר {city}", 72)
     
-    # ניסיון 2 (גיבוי): אם אין כלום על העיר, תביא חדשות כלליות על מזג האוויר בישראל
-    # כאן אנחנו לוקחים רק מה-24 שעות האחרונות כי זה תמיד מתעדכן
+    # אם אין, חדשות כלליות (עד 30 שעות - כפי שביקשת)
     if not news:
-        news = fetch_feed("מזג האוויר בישראל", 24)
-        # מסמנים שזה חדשות כלליות
-        if news:
-            news[0]['is_general'] = True 
+        news = fetch_feed("מזג האוויר בישראל", 30)
             
-    return news[:6]
+    # החזרת עד 12 כתבות (במקום 6)
+    return news[:12]
 
 def get_clothing_advice(temp):
     if temp > 25: return "🩳 חולצה קצרה, משקפי שמש וכובע"
@@ -301,8 +295,6 @@ with st.sidebar:
         if st.session_state.selected_city:
             news_items = get_news(st.session_state.selected_city)
             if news_items:
-                if news_items[0].get('is_general'):
-                     st.caption("לא נמצאו חדשות על העיר, מציג חדשות כלליות:")
                 for item in news_items:
                     src = item.source.title if hasattr(item, 'source') else 'News'
                     st.markdown(f"""
@@ -311,8 +303,6 @@ with st.sidebar:
                         <div class="news-source">{src}</div>
                     </div>
                     """, unsafe_allow_html=True)
-            else:
-                st.caption("אין עדכונים חדשים כרגע")
 
 # --- כפתורים צפים למטה ---
 with st.sidebar:
@@ -348,9 +338,6 @@ if st.session_state.view_mode == 'mobile' and st.session_state.show_news_screen:
     if city_in:
         news_items = get_news(city_in)
         if news_items:
-            if news_items[0].get('is_general'):
-                 st.info(f"לא נמצאו חדשות ספציפיות על {city_name} ב-72 השעות האחרונות. מציג חדשות כלליות:")
-            
             for item in news_items:
                 src = item.source.title if hasattr(item, 'source') else 'News'
                 st.markdown(f"""
@@ -359,8 +346,6 @@ if st.session_state.view_mode == 'mobile' and st.session_state.show_news_screen:
                     <div class="news-source">{src} • {item.published if 'published' in item else ''}</div>
                 </div>
                 """, unsafe_allow_html=True)
-        else:
-            st.info("לא נמצאו עדכונים רלוונטיים כרגע.")
 
 # 2. מצב ראשי
 elif data:

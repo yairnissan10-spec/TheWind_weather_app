@@ -6,8 +6,9 @@ import feedparser
 from datetime import datetime, timedelta
 from urllib.parse import quote
 import numpy as np
+from email.utils import parsedate_to_datetime # ספריה חדשה לטיפול בתאריכי חדשות
 
-# --- 1. הגדרת דף ---
+# --- 1. הגדרת דף (עם הכותרת החדשה שביקשת) ---
 st.set_page_config(page_title="TheWind - תחזית מזג אוויר חכמה", page_icon="logo.png", layout="wide")
 
 # --- 2. ניהול מצבים (State Management) ---
@@ -20,7 +21,7 @@ if 'show_news_screen' not in st.session_state:
 if 'selected_city' not in st.session_state:
     st.session_state.selected_city = "Tel Aviv"
 if 'view_mode' not in st.session_state:
-    st.session_state.view_mode = 'desktop' # ברירת מחדל
+    st.session_state.view_mode = 'desktop'
 
 def toggle_theme():
     st.session_state.theme = 'dark' if st.session_state.theme == 'light' else 'light'
@@ -82,7 +83,7 @@ st.markdown(f"""
         border-left: 1px solid {border_color};
     }}
     
-    /* עיצוב תיבת הטקסט - גוגל סטייל */
+    /* עיצוב תיבת הטקסט */
     div[data-testid="stTextInput"] input {{
         background-color: {card_bg};
         color: {text_color};
@@ -184,7 +185,7 @@ st.markdown(f"""
     /* כפתור החלפת ממשק (שמאל למעלה) */
     .view-toggle {{
         position: fixed;
-        top: 60px; /* מתחת להדר של סטרימליט */
+        top: 60px;
         left: 20px;
         z-index: 99999;
     }}
@@ -224,7 +225,21 @@ def get_data(city):
 def get_news(city):
     try:
         encoded = quote(city)
-        return feedparser.parse(f"https://news.google.com/rss/search?q=מזג%20האוויר%20{encoded}&hl=he&gl=IL&ceid=IL:he").entries[:6]
+        # מושכים יותר כתבות בהתחלה כדי שנוכל לסנן
+        feed = feedparser.parse(f"https://news.google.com/rss/search?q=מזג%20האוויר%20{encoded}&hl=he&gl=IL&ceid=IL:he")
+        
+        filtered_entries = []
+        for entry in feed.entries:
+            # המרת תאריך הפרסום לאובייקט זמן שאפשר לחשב
+            if 'published' in entry:
+                pub_date = parsedate_to_datetime(entry.published)
+                # בדיקה אם הכתבה פורסמה ב-30 השעות האחרונות
+                # אנחנו משתמשים בזמן של הכתבה כדי למנוע בעיות אזורי זמן
+                now = datetime.now(pub_date.tzinfo)
+                if now - pub_date <= timedelta(hours=30):
+                    filtered_entries.append(entry)
+        
+        return filtered_entries[:6] # מחזירים את ה-6 החדשות ביותר שעברו את הסינון
     except: return []
 
 def get_clothing_advice(temp):
@@ -247,7 +262,6 @@ def get_status_text(code):
 
 # --- 6. כפתור החלפת ממשק (שמאל למעלה) ---
 st.markdown('<div class="view-toggle">', unsafe_allow_html=True)
-# הכפתור מציג את האייקון של מה שיקרה אם תלחץ עליו (אם אתה במחשב, הוא מראה טלפון ולהפך)
 toggle_icon = "📱" if st.session_state.view_mode == 'desktop' else "💻"
 if st.button(toggle_icon, key="view_toggler"):
     toggle_view_mode()
@@ -256,7 +270,6 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 # --- 7. ממשק משתמש (UI) ---
 
-# תפריט צד (משותף לשני המצבים - חיפוש)
 with st.sidebar:
     try:
         st.image("logo.png", use_container_width=True)
@@ -275,10 +288,10 @@ with st.sidebar:
     if city_input and city_input != st.session_state.selected_city:
         st.session_state.selected_city = city_input
 
-    # במצב דסקטופ - החדשות מופיעות כאן בסרגל הצד
+    # במצב דסקטופ - חדשות בסרגל צד
     if st.session_state.view_mode == 'desktop':
         st.write("---")
-        st.subheader("📰 עדכונים")
+        st.subheader("📰 עדכונים (30 שעות)")
         if st.session_state.selected_city:
             news_items = get_news(st.session_state.selected_city)
             if news_items:
@@ -291,12 +304,11 @@ with st.sidebar:
                     </div>
                     """, unsafe_allow_html=True)
             else:
-                st.caption("אין עדכונים זמינים")
+                st.caption("אין עדכונים חדשים בשעות האחרונות")
 
-# --- כפתורים צפים למטה (Theme, Access) ---
+# --- כפתורים צפים למטה ---
 with st.sidebar:
     st.markdown('<div class="floating-buttons">', unsafe_allow_html=True)
-    # במצב מובייל יש כפתור נוסף לחדשות
     cols = st.columns([1,1,1]) if st.session_state.view_mode == 'mobile' else st.columns([1,1])
     
     with cols[0]:
@@ -304,7 +316,6 @@ with st.sidebar:
     with cols[1]:
         if st.button("♿"): toggle_accessibility(); st.rerun()
     
-    # כפתור חדשות למובייל בלבד
     if st.session_state.view_mode == 'mobile':
         with cols[2]:
             news_icon = "🏠" if st.session_state.show_news_screen else "📰"
@@ -318,12 +329,12 @@ city_in = st.session_state.selected_city
 data, city_name = get_data(city_in) if city_in else (None, None)
 
 # ==========================================
-# לוגיקה ראשית: פיצול בין מובייל לדסקטופ
+# לוגיקה ראשית
 # ==========================================
 
 # 1. מצב מובייל - מסך חדשות מלא
 if st.session_state.view_mode == 'mobile' and st.session_state.show_news_screen:
-    st.markdown(f"<h1 style='text-align:center;'>📰 חדשות - {city_name}</h1>", unsafe_allow_html=True)
+    st.markdown(f"<h1 style='text-align:center;'>📰 חדשות (30 שעות)</h1>", unsafe_allow_html=True)
     if st.button("⬅️ חזרה"): toggle_news_view(); st.rerun()
     
     if city_in:
@@ -338,18 +349,15 @@ if st.session_state.view_mode == 'mobile' and st.session_state.show_news_screen:
                 </div>
                 """, unsafe_allow_html=True)
         else:
-            st.info("אין חדשות.")
+            st.info("לא נמצאו עדכונים ב-30 השעות האחרונות.")
 
-# 2. מצב ראשי (דסקטופ או מובייל רגיל)
+# 2. מצב ראשי
 elif data:
     curr = data['current']
     
     st.markdown(f"<h1 style='font-size:3rem; margin-bottom:0;'>{city_name}</h1>", unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # --- תצוגת מדדים ---
-    # בדסקטופ: 6 בשורה
-    # במובייל: סטרימליט ישבור שורות לבד, אבל נשתמש ב-columns הרגיל
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     
     rain_sum = data['daily']['precipitation_sum'][0]
@@ -363,12 +371,11 @@ elif data:
     with col2: st.metric("גובה מים", f"{rain_sum} מ\"מ")
     with col3: st.metric("לחות", f"{curr['relative_humidity_2m']}%")
     with col4: st.metric("סיכוי לגשם", f"{rain_prob}%")
-    with col5: st.metric("רוח", f'{round(curr['wind_speed_10m'])} קמ"ש')
+    with col5: st.metric("רוח", f"{round(curr['wind_speed_10m'])}")
     with col6: st.metric("מצב", final_status)
 
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # --- המלצות ---
     c_clothing, c_driving = st.columns(2)
     with c_clothing:
         st.info(f"💡 **המלצת לבוש:** {get_clothing_advice(curr['temperature_2m'])}")
@@ -381,7 +388,6 @@ elif data:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # --- לשוניות ---
     tab_graph, tab_week, tab_month = st.tabs(["📉 24 שעות", "📅 השבוע", "🗓️ החודש"])
 
     with tab_graph:
@@ -411,7 +417,6 @@ elif data:
         st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
     with tab_week:
-        # במובייל נרצה 2-3 בשורה, בדסקטופ 7
         num_cols = 2 if st.session_state.view_mode == 'mobile' else 7
         cols = st.columns(num_cols)
         
@@ -419,8 +424,6 @@ elif data:
             d_date = datetime.strptime(data['daily']['time'][i], "%Y-%m-%d").strftime("%d/%m")
             d_temp = round(data['daily']['temperature_2m_max'][i])
             d_rain = data['daily']['precipitation_probability_max'][i]
-            
-            # חישוב אינדקס העמודה הנכון (מודולו)
             col_idx = i % num_cols
             with cols[col_idx]:
                 st.markdown(f"""
@@ -444,7 +447,6 @@ elif data:
                 r = np.random.randint(0, 30)
             month_data.append((d_str, t, r))
         
-        # גריד מותאם
         grid_cols = 3 if st.session_state.view_mode == 'mobile' else 6
         for i in range(0, 30, grid_cols):
             cols = st.columns(grid_cols)
